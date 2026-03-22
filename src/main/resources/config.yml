@@ -1,0 +1,59 @@
+days:
+  default-duration-seconds: 10800
+  1:
+    duration-seconds: 10800
+  2:
+    duration-seconds: 10800
+  3:
+    duration-seconds: 10800
+  4:
+    duration-seconds: 10800
+  5:
+    duration-seconds: 10800
+  6:
+    duration-seconds: 10800
+  7:
+    duration-seconds: 10800
+
+teams:
+  max-size: 4
+  friendly-fire-before-day6: false
+
+combat:
+  tag-seconds: 20
+  logout-grace-seconds: 45
+
+bounty:
+  streak-threshold: 4
+
+worldguard:
+  zones:
+    day1: []
+    day2: []
+    day3: []
+    day4: []
+    day5: []
+
+structures:
+  day1:
+    locations: []
+  day2:
+    locations: []
+  day3:
+    locations: []
+  day4:
+    locations: []
+  day5:
+    locations: []
+
+arena:
+  spawns: []
+  border:
+    start-size: 300.0
+    end-size: 30.0
+    shrink-seconds: 900
+
+anti-lag:
+  cleanup-interval-seconds: 30
+  item-max-age-ticks: 2400
+  hostile-mob-cap: 220

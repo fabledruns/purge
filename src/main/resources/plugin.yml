@@ -1,0 +1,27 @@
+name: purge
+version: '1.0.0-beta'
+main: me.jehoshua.purge.PurgePlugin
+api-version: '1.21'
+load: STARTUP
+authors: [ Jehoshua M ]
+description: The purge plugin for Minecraft Purge events.
+website: jehoshua.me
+softdepend: [WorldGuard]
+
+commands:
+  purge:
+    description: Purge event admin command
+    usage: /purge <start|pause|resume|next|setday|reload|status|save>
+    permission: purge.admin
+  team:
+    description: Team management command
+    usage: /team <create|join|leave|lock|unlock|info>
+    permission: purge.team
+
+permissions:
+  purge.admin:
+    description: Allows purge event administration
+    default: op
+  purge.team:
+    description: Allows players to manage their teams
+    default: true
