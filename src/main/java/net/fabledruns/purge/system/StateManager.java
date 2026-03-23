@@ -9,6 +9,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicLong;
 import net.fabledruns.purge.PurgePlugin;
 import org.bukkit.Bukkit;
 import org.bukkit.configuration.ConfigurationSection;
@@ -19,14 +20,26 @@ public final class StateManager {
     private final PurgePlugin plugin;
     private final File stateFile;
     private final Object lock;
+    private final Object ioLock;
+    private final Object asyncSaveLock;
+    private final AtomicLong saveSequence;
 
     private StateData state;
+    private volatile long latestPersistedSequence;
+    private boolean asyncSaveScheduled;
+    private PendingSave pendingAsyncSave;
 
     public StateManager(PurgePlugin plugin) {
         this.plugin = plugin;
         this.stateFile = new File(plugin.getDataFolder(), "state.yml");
         this.lock = new Object();
+        this.ioLock = new Object();
+        this.asyncSaveLock = new Object();
+        this.saveSequence = new AtomicLong(0L);
         this.state = new StateData();
+        this.latestPersistedSequence = 0L;
+        this.asyncSaveScheduled = false;
+        this.pendingAsyncSave = null;
     }
 
     public void loadStateSync() {
@@ -96,23 +109,56 @@ public final class StateManager {
             loaded.arena.finished = yaml.getBoolean("arena.finished", false);
             loaded.arena.winnerTeam = yaml.getString("arena.winner-team", null);
 
+            for (Integer day : yaml.getIntegerList("structures.spawned-days")) {
+                if (day != null && day >= 1 && day <= 5) {
+                    loaded.spawnedStructureDays.add(day);
+                }
+            }
+
             state = loaded;
         }
     }
 
     public void saveStateSync() {
-        StateData snapshot = copyState();
-        writeState(snapshot);
+        PendingSave save = new PendingSave(copyState(), saveSequence.incrementAndGet());
+        writeState(save);
     }
 
     public void saveStateAsync() {
-        StateData snapshot = copyState();
+        PendingSave save = new PendingSave(copyState(), saveSequence.incrementAndGet());
         if (!plugin.isEnabled()) {
-            writeState(snapshot);
+            writeState(save);
             return;
         }
 
-        Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> writeState(snapshot));
+        boolean shouldSchedule = false;
+        synchronized (asyncSaveLock) {
+            pendingAsyncSave = save;
+            if (!asyncSaveScheduled) {
+                asyncSaveScheduled = true;
+                shouldSchedule = true;
+            }
+        }
+
+        if (shouldSchedule) {
+            Bukkit.getScheduler().runTaskAsynchronously(plugin, this::drainAsyncSaves);
+        }
+    }
+
+    private void drainAsyncSaves() {
+        while (true) {
+            PendingSave next;
+            synchronized (asyncSaveLock) {
+                next = pendingAsyncSave;
+                pendingAsyncSave = null;
+                if (next == null) {
+                    asyncSaveScheduled = false;
+                    return;
+                }
+            }
+
+            writeState(next);
+        }
     }
 
     public int getCurrentDay() {
@@ -236,6 +282,23 @@ public final class StateManager {
         }
     }
 
+    public Set<Integer> getSpawnedStructureDays() {
+        synchronized (lock) {
+            return new HashSet<>(state.spawnedStructureDays);
+        }
+    }
+
+    public void setSpawnedStructureDays(Set<Integer> spawnedDays) {
+        synchronized (lock) {
+            state.spawnedStructureDays.clear();
+            for (Integer day : spawnedDays) {
+                if (day != null && day >= 1 && day <= 5) {
+                    state.spawnedStructureDays.add(day);
+                }
+            }
+        }
+    }
+
     public Map<String, TeamState> getTeams() {
         synchronized (lock) {
             Map<String, TeamState> copy = new HashMap<>();
@@ -305,38 +368,48 @@ public final class StateManager {
             copy.arena.started = state.arena.started;
             copy.arena.finished = state.arena.finished;
             copy.arena.winnerTeam = state.arena.winnerTeam;
+            copy.spawnedStructureDays.addAll(state.spawnedStructureDays);
             return copy;
         }
     }
 
-    private void writeState(StateData snapshot) {
-        YamlConfiguration yaml = new YamlConfiguration();
+    private void writeState(PendingSave save) {
+        synchronized (ioLock) {
+            if (save.sequence() <= latestPersistedSequence) {
+                return;
+            }
 
-        yaml.set("day.current", snapshot.currentDay);
-        yaml.set("day.end-epoch-ms", snapshot.dayEndEpochMillis);
-        yaml.set("day.paused", snapshot.paused);
-        yaml.set("legendary.count", snapshot.legendaryCount);
-        yaml.set("legendary.crafted-ids", snapshot.craftedLegendaryIds.stream().sorted().toList());
-        yaml.set("teams-meta.next-id", snapshot.nextTeamId);
+            StateData snapshot = save.snapshot();
+            YamlConfiguration yaml = new YamlConfiguration();
 
-        yaml.set("players.alive", snapshot.alivePlayers.stream().map(UUID::toString).toList());
-        yaml.set("players.dead", snapshot.deadPlayers.stream().map(UUID::toString).toList());
+            yaml.set("day.current", snapshot.currentDay);
+            yaml.set("day.end-epoch-ms", snapshot.dayEndEpochMillis);
+            yaml.set("day.paused", snapshot.paused);
+            yaml.set("legendary.count", snapshot.legendaryCount);
+            yaml.set("legendary.crafted-ids", snapshot.craftedLegendaryIds.stream().sorted().toList());
+            yaml.set("teams-meta.next-id", snapshot.nextTeamId);
 
-        for (Map.Entry<String, TeamState> entry : snapshot.teams.entrySet()) {
-            String basePath = "teams." + entry.getKey();
-            yaml.set(basePath + ".locked", entry.getValue().locked);
-            yaml.set(basePath + ".color-index", entry.getValue().colorIndex);
-            yaml.set(basePath + ".members", entry.getValue().members.stream().map(UUID::toString).toList());
-        }
+            yaml.set("players.alive", snapshot.alivePlayers.stream().map(UUID::toString).toList());
+            yaml.set("players.dead", snapshot.deadPlayers.stream().map(UUID::toString).toList());
 
-        yaml.set("arena.started", snapshot.arena.started);
-        yaml.set("arena.finished", snapshot.arena.finished);
-        yaml.set("arena.winner-team", snapshot.arena.winnerTeam);
+            for (Map.Entry<String, TeamState> entry : snapshot.teams.entrySet()) {
+                String basePath = "teams." + entry.getKey();
+                yaml.set(basePath + ".locked", entry.getValue().locked);
+                yaml.set(basePath + ".color-index", entry.getValue().colorIndex);
+                yaml.set(basePath + ".members", entry.getValue().members.stream().map(UUID::toString).toList());
+            }
 
-        try {
-            yaml.save(stateFile);
-        } catch (IOException exception) {
-            plugin.getLogger().severe("Failed to save state.yml: " + exception.getMessage());
+            yaml.set("arena.started", snapshot.arena.started);
+            yaml.set("arena.finished", snapshot.arena.finished);
+            yaml.set("arena.winner-team", snapshot.arena.winnerTeam);
+            yaml.set("structures.spawned-days", snapshot.spawnedStructureDays.stream().sorted().toList());
+
+            try {
+                yaml.save(stateFile);
+                latestPersistedSequence = save.sequence();
+            } catch (IOException exception) {
+                plugin.getLogger().severe("Failed to save state.yml: " + exception.getMessage());
+            }
         }
     }
 
@@ -431,5 +504,9 @@ public final class StateManager {
         private final Set<UUID> deadPlayers = new HashSet<>();
         private final Map<String, TeamState> teams = new HashMap<>();
         private final ArenaState arena = new ArenaState();
+        private final Set<Integer> spawnedStructureDays = new HashSet<>();
+    }
+
+    private record PendingSave(StateData snapshot, long sequence) {
     }
 }

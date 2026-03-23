@@ -66,7 +66,7 @@ public final class ContentManager implements Listener {
         this.legendaryItems = new HashMap<>();
         this.legendaryIdsByRecipeKey = new HashMap<>();
         this.legendaryRecipeKeys = new HashSet<>();
-        this.spawnedStructureDays = new HashSet<>();
+        this.spawnedStructureDays = new HashSet<>(stateManager.getSpawnedStructureDays());
 
         this.legendaryCount = Math.max(stateManager.getLegendaryCount(), stateManager.getCraftedLegendaryIds().size());
         this.legendaryRecipesRegistered = false;
@@ -253,6 +253,8 @@ public final class ContentManager implements Listener {
         }
 
         spawnedStructureDays.add(day);
+        stateManager.setSpawnedStructureDays(spawnedStructureDays);
+        stateManager.saveStateAsync();
         Bukkit.broadcast(Component.text("Day " + day + " structures are now active."));
     }
 

@@ -12,6 +12,7 @@ import net.fabledruns.purge.system.StateManager;
 import net.fabledruns.purge.team.TeamManager;
 import net.kyori.adventure.text.Component;
 import org.bukkit.Bukkit;
+import org.bukkit.GameMode;
 import org.bukkit.Location;
 import org.bukkit.World;
 import org.bukkit.WorldBorder;
@@ -51,8 +52,17 @@ public final class ArenaManager {
     }
 
     public void onDayChanged(int day) {
-        if (day == 7 && !started) {
+        if (day != 7) {
+            return;
+        }
+
+        if (!started) {
             startArena();
+            return;
+        }
+
+        if (!finished) {
+            resumeArena();
         }
     }
 
@@ -104,10 +114,25 @@ public final class ArenaManager {
             index++;
         }
 
-        configureArenaBorder(spawns.get(0));
+        configureArenaBorder(spawns.get(0), false);
         persistArenaState();
 
         Bukkit.broadcast(Component.text("Day 7 arena started. Last team standing takes it all."));
+        evaluateWinCondition();
+    }
+
+    private void resumeArena() {
+        List<Location> spawns = loadArenaSpawns();
+        Location center;
+        if (!spawns.isEmpty()) {
+            center = spawns.get(0);
+        } else {
+            World world = Bukkit.getWorlds().get(0);
+            center = world.getSpawnLocation();
+        }
+
+        configureArenaBorder(center, true);
+        enforceSpectatorState();
         evaluateWinCondition();
     }
 
@@ -152,18 +177,24 @@ public final class ArenaManager {
         }
     }
 
-    private void configureArenaBorder(Location center) {
+    private void configureArenaBorder(Location center, boolean resumeExistingBorder) {
         World world = center.getWorld();
         if (world == null) {
             return;
         }
 
-        double startSize = Math.max(50.0D, plugin.getConfig().getDouble("arena.border.start-size", 300.0D));
+        double configuredStartSize = Math.max(50.0D, plugin.getConfig().getDouble("arena.border.start-size", 300.0D));
         double endSize = Math.max(10.0D, plugin.getConfig().getDouble("arena.border.end-size", 30.0D));
         long shrinkSeconds = Math.max(10L, plugin.getConfig().getLong("arena.border.shrink-seconds", 900L));
 
         WorldBorder border = world.getWorldBorder();
         border.setCenter(center);
+
+        double resolvedStartSize = configuredStartSize;
+        if (resumeExistingBorder) {
+            resolvedStartSize = Math.max(endSize, Math.min(configuredStartSize, border.getSize()));
+        }
+        final double startSize = resolvedStartSize;
         border.setSize(startSize);
 
         if (borderTask != null) {
@@ -172,6 +203,11 @@ public final class ArenaManager {
 
         long totalTicks = shrinkSeconds * 20L;
         if (totalTicks <= 0L) {
+            border.setSize(endSize);
+            return;
+        }
+
+        if (startSize <= endSize) {
             border.setSize(endSize);
             return;
         }
@@ -196,6 +232,14 @@ public final class ArenaManager {
                 elapsedTicks += 20L;
             }
         }, 20L, 20L);
+    }
+
+    private void enforceSpectatorState() {
+        for (Player online : Bukkit.getOnlinePlayers()) {
+            if (!playerManager.isAlive(online.getUniqueId())) {
+                online.setGameMode(GameMode.SPECTATOR);
+            }
+        }
     }
 
     private void evaluateWinCondition() {

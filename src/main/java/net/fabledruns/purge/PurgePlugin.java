@@ -36,7 +36,9 @@ public final class PurgePlugin extends JavaPlugin {
         saveDefaultConfig();
         initializeManagers();
         registerListeners();
-        registerCommands();
+        if (!registerCommands() || !isEnabled()) {
+            return;
+        }
         startRuntimeTasks();
 
         getLogger().info("PurgePlugin enabled. Locked in and lowkey dangerous.");
@@ -89,21 +91,26 @@ public final class PurgePlugin extends JavaPlugin {
         Bukkit.getPluginManager().registerEvents(weaponAbilityManager, this);
     }
 
-    private void registerCommands() {
+    private boolean registerCommands() {
         PluginCommand purgeRoot = getCommand("purge");
         PluginCommand teamRoot  = getCommand("team");
 
         if (purgeRoot == null || teamRoot == null) {
             getLogger().severe("Required commands are missing in plugin.yml. Plugin bootstrap halted.");
             Bukkit.getPluginManager().disablePlugin(this);
-            return;
+            return false;
         }
 
         purgeRoot.setExecutor(purgeCommand); purgeRoot.setTabCompleter(purgeCommand);
         teamRoot.setExecutor(purgeCommand);  teamRoot.setTabCompleter(purgeCommand);
+        return true;
     }
 
     private void startRuntimeTasks() {
+        if (!isEnabled()) {
+            return;
+        }
+
         gameManager.start();
         performanceManager.start();
         weaponAbilityManager.start();
