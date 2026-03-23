@@ -1,4 +1,4 @@
-package me.jehoshua.purge.arena;
+package net.fabledruns.purge.game;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -6,11 +6,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
-import me.jehoshua.purge.PurgePlugin;
-import me.jehoshua.purge.game.GameManager;
-import me.jehoshua.purge.player.PlayerManager;
-import me.jehoshua.purge.state.StateManager;
-import me.jehoshua.purge.team.TeamManager;
+import net.fabledruns.purge.PurgePlugin;
+import net.fabledruns.purge.system.PlayerManager;
+import net.fabledruns.purge.system.StateManager;
+import net.fabledruns.purge.team.TeamManager;
 import net.kyori.adventure.text.Component;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;

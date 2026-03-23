@@ -1,11 +1,10 @@
 name: purge
 version: '1.0.0-beta'
-main: me.jehoshua.purge.PurgePlugin
-api-version: '1.21'
+main: net.fabledruns.purge.PurgePlugin
+api-version: '1.21.11'
 load: STARTUP
-authors: [ Jehoshua M ]
+authors: [ FabledRuns ]
 description: The purge plugin for Minecraft Purge events.
-website: jehoshua.me
 softdepend: [WorldGuard]
 
 commands:

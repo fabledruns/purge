@@ -57,3 +57,37 @@ anti-lag:
   cleanup-interval-seconds: 30
   item-max-age-ticks: 2400
   hostile-mob-cap: 220
+
+legendary-weapons:
+  wither-bone-blade:
+    cooldown-seconds: 90
+    empowered-seconds: 10
+    damage-multiplier: 1.25
+    skull-chance: 0.5
+    skulls-per-proc: 3
+    max-skulls-per-second: 12
+
+  dragon-wings:
+    cooldown-seconds: 10
+    boost-multiplier: 1.2
+    toggle-debounce-ms: 140
+    jump-toggle-enabled: true
+    sneak-fallback-enabled: true
+
+  stone-fall:
+    cooldown-seconds: 1
+    lunge-multiplier: 2.25
+    fall-damage-reduction: 0.75
+    saturation-drain: 2.5
+    food-drain: 0
+    exhaustion-add: 1.5
+
+  void-snare:
+    cooldown-seconds: 20
+    full-charge-force: 0.98
+    root-ticks: 30
+    weakness-ticks: 80
+    homing-range: 6.0
+    homing-turn-rate: 0.08
+    homing-check-interval-ticks: 2
+    max-arrow-life-ticks: 200

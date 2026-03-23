@@ -1,11 +1,9 @@
-package me.jehoshua.purge.game;
+package net.fabledruns.purge.game;
 
 import java.util.concurrent.TimeUnit;
-import me.jehoshua.purge.PurgePlugin;
-import me.jehoshua.purge.arena.ArenaManager;
-import me.jehoshua.purge.content.ContentManager;
-import me.jehoshua.purge.state.StateManager;
-import me.jehoshua.purge.world.WorldManager;
+import net.fabledruns.purge.PurgePlugin;
+import net.fabledruns.purge.system.StateManager;
+import net.fabledruns.purge.system.WorldManager;
 import net.kyori.adventure.text.Component;
 import org.bukkit.Bukkit;
 import org.bukkit.scheduler.BukkitTask;

@@ -1,16 +1,16 @@
-package me.jehoshua.purge.command;
+package net.fabledruns.purge.command;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
-import me.jehoshua.purge.PurgePlugin;
-import me.jehoshua.purge.arena.ArenaManager;
-import me.jehoshua.purge.game.GameManager;
-import me.jehoshua.purge.performance.PerformanceManager;
-import me.jehoshua.purge.player.PlayerManager;
-import me.jehoshua.purge.state.StateManager;
-import me.jehoshua.purge.team.TeamManager;
-import me.jehoshua.purge.world.WorldManager;
+import net.fabledruns.purge.PurgePlugin;
+import net.fabledruns.purge.game.ArenaManager;
+import net.fabledruns.purge.game.GameManager;
+import net.fabledruns.purge.system.PerformanceManager;
+import net.fabledruns.purge.system.PlayerManager;
+import net.fabledruns.purge.system.StateManager;
+import net.fabledruns.purge.system.WorldManager;
+import net.fabledruns.purge.team.TeamManager;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
@@ -100,6 +100,10 @@ public final class PurgeCommand implements CommandExecutor, TabCompleter {
                 plugin.reloadConfig();
                 worldManager.reloadConfig();
                 performanceManager.reloadConfig();
+                if (plugin.getWeaponAbilityManager() != null) {
+                    plugin.getWeaponAbilityManager().stop();
+                    plugin.getWeaponAbilityManager().start();
+                }
                 sender.sendMessage("Config reloaded.");
             }
             case "status" -> sendStatus(sender);

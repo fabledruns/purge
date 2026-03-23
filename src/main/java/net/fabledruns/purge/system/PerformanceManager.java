@@ -1,8 +1,8 @@
-package me.jehoshua.purge.performance;
+package net.fabledruns.purge.system;
 
 import java.util.ArrayList;
 import java.util.List;
-import me.jehoshua.purge.PurgePlugin;
+import net.fabledruns.purge.PurgePlugin;
 import org.bukkit.World;
 import org.bukkit.entity.Item;
 import org.bukkit.entity.Monster;

@@ -1,4 +1,4 @@
-package me.jehoshua.purge.state;
+package net.fabledruns.purge.system;
 
 import java.io.File;
 import java.io.IOException;
@@ -9,7 +9,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
-import me.jehoshua.purge.PurgePlugin;
+import net.fabledruns.purge.PurgePlugin;
 import org.bukkit.Bukkit;
 import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.configuration.file.YamlConfiguration;

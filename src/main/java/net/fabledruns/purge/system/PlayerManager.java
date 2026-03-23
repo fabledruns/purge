@@ -1,13 +1,12 @@
-package me.jehoshua.purge.player;
+package net.fabledruns.purge.system;
 
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
-import me.jehoshua.purge.PurgePlugin;
-import me.jehoshua.purge.arena.ArenaManager;
-import me.jehoshua.purge.game.GameManager;
-import me.jehoshua.purge.state.StateManager;
+import net.fabledruns.purge.PurgePlugin;
+import net.fabledruns.purge.game.ArenaManager;
+import net.fabledruns.purge.game.GameManager;
 import net.kyori.adventure.text.Component;
 import org.bukkit.Bukkit;
 import org.bukkit.GameMode;

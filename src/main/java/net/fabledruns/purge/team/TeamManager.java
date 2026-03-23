@@ -1,4 +1,4 @@
-package me.jehoshua.purge.team;
+package net.fabledruns.purge.team;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -8,8 +8,8 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
-import me.jehoshua.purge.PurgePlugin;
-import me.jehoshua.purge.state.StateManager;
+import net.fabledruns.purge.PurgePlugin;
+import net.fabledruns.purge.system.StateManager;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import org.bukkit.Bukkit;
@@ -63,7 +63,7 @@ public final class TeamManager implements Listener {
         }
 
         int teamId = nextTeamId++;
-        Team team = new Team(teamId, pickAvailableColorIndex());
+        Team team = new Team(teamId, pickColorIndexForTeamId(teamId));
         team.members.add(owner.getUniqueId());
         teams.put(teamId, team);
         playerToTeam.put(owner.getUniqueId(), teamId);
@@ -234,7 +234,6 @@ public final class TeamManager implements Listener {
         int maxTeamId = 0;
         int candidateNextId = Math.max(1, stateManager.getNextTeamId());
         boolean migrated = false;
-        Set<Integer> usedColors = new HashSet<>();
 
         Map<String, StateManager.TeamState> stored = stateManager.getTeams();
         for (Map.Entry<String, StateManager.TeamState> entry : stored.entrySet()) {
@@ -250,12 +249,10 @@ public final class TeamManager implements Listener {
                 migrated = true;
             }
 
-            int colorIndex = normalizeColorIndex(entry.getValue().getColorIndex());
-            if (usedColors.contains(colorIndex)) {
-                colorIndex = pickAvailableColorIndex(usedColors, teamId);
+            int colorIndex = pickColorIndexForTeamId(teamId);
+            if (normalizeColorIndex(entry.getValue().getColorIndex()) != colorIndex) {
                 migrated = true;
             }
-            usedColors.add(colorIndex);
 
             Team team = new Team(teamId, colorIndex);
             team.locked = entry.getValue().isLocked();
@@ -302,22 +299,8 @@ public final class TeamManager implements Listener {
         return fallback;
     }
 
-    private int pickAvailableColorIndex() {
-        Set<Integer> usedColors = new HashSet<>();
-        for (Team team : teams.values()) {
-            usedColors.add(normalizeColorIndex(team.colorIndex));
-        }
-        return pickAvailableColorIndex(usedColors, nextTeamId - 1);
-    }
-
-    private int pickAvailableColorIndex(Set<Integer> usedColors, int seed) {
-        for (int i = 0; i < TEAM_COLORS.size(); i++) {
-            if (!usedColors.contains(i)) {
-                return i;
-            }
-        }
-
-        return Math.floorMod(seed, TEAM_COLORS.size());
+    private int pickColorIndexForTeamId(int teamId) {
+        return Math.floorMod(teamId - 1, TEAM_COLORS.size());
     }
 
     private int normalizeColorIndex(int index) {
