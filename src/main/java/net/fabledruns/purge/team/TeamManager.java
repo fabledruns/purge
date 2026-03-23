@@ -10,11 +10,13 @@ import java.util.Set;
 import java.util.UUID;
 import net.fabledruns.purge.PurgePlugin;
 import net.fabledruns.purge.system.StateManager;
+import io.papermc.paper.event.player.AsyncChatEvent;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
+import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.player.PlayerJoinEvent;
 
@@ -228,6 +230,13 @@ public final class TeamManager implements Listener {
     @EventHandler
     public void onPlayerJoin(PlayerJoinEvent event) {
         updatePlayerVisuals(event.getPlayer());
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
+    public void onPlayerChat(AsyncChatEvent event) {
+        event.renderer((source, sourceDisplayName, message, viewer) -> sourceDisplayName
+            .append(Component.text(": ", NamedTextColor.GRAY))
+            .append(message.colorIfAbsent(NamedTextColor.WHITE)));
     }
 
     private void loadFromState() {

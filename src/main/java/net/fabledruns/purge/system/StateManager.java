@@ -236,6 +236,13 @@ public final class StateManager {
         }
     }
 
+    public void clearLegendaryProgress() {
+        synchronized (lock) {
+            state.craftedLegendaryIds.clear();
+            state.legendaryCount = 0;
+        }
+    }
+
     public int getNextTeamId() {
         synchronized (lock) {
             return state.nextTeamId;

@@ -7,6 +7,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 import net.fabledruns.purge.PurgePlugin;
 import net.fabledruns.purge.legendary.LegendaryWeapon;
@@ -18,6 +19,7 @@ import net.fabledruns.purge.legendary.weapons.WitherBoneBladeWeapon;
 import net.fabledruns.purge.system.StateManager;
 import net.fabledruns.purge.team.TeamManager;
 import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.format.NamedTextColor;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.Material;
@@ -25,6 +27,7 @@ import org.bukkit.NamespacedKey;
 import org.bukkit.World;
 import org.bukkit.block.Block;
 import org.bukkit.block.Chest;
+import org.bukkit.entity.HumanEntity;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
@@ -41,6 +44,7 @@ public final class ContentManager implements Listener {
     public static final String DRAGON_WINGS_ID = DragonWingsWeapon.ID;
     public static final String STONE_FALL_ID = StoneFallWeapon.ID;
     public static final String VOID_SNARE_ID = VoidSnareWeapon.ID;
+    private static final long LEGENDARY_LOCK_MESSAGE_COOLDOWN_MS = 2000L;
 
     private final PurgePlugin plugin;
     private final StateManager stateManager;
@@ -50,6 +54,7 @@ public final class ContentManager implements Listener {
 
     private final Map<NamespacedKey, ItemStack> legendaryItems;
     private final Map<NamespacedKey, String> legendaryIdsByRecipeKey;
+    private final Map<UUID, Long> legendaryLockMessageMillis;
     private final Set<NamespacedKey> legendaryRecipeKeys;
     private final Set<Integer> spawnedStructureDays;
 
@@ -65,6 +70,7 @@ public final class ContentManager implements Listener {
 
         this.legendaryItems = new HashMap<>();
         this.legendaryIdsByRecipeKey = new HashMap<>();
+        this.legendaryLockMessageMillis = new HashMap<>();
         this.legendaryRecipeKeys = new HashSet<>();
         this.spawnedStructureDays = new HashSet<>(stateManager.getSpawnedStructureDays());
 
@@ -75,6 +81,10 @@ public final class ContentManager implements Listener {
     }
 
     public void onDayChanged(int day) {
+        if (day < 3) {
+            clearLegendaryProgressIfLockedByDay();
+        }
+
         if (day >= 3 && !legendaryRecipesRegistered) {
             registerLegendaryRecipes();
         }
@@ -101,8 +111,13 @@ public final class ContentManager implements Listener {
             return;
         }
 
-        if (gameManager.getCurrentDay() < 3
-                || stateManager.isLegendaryCrafted(weaponId)
+        if (gameManager.getCurrentDay() < 3) {
+            notifyLegendaryLockedUntilDayThree(event.getViewers());
+            event.getInventory().setResult(new ItemStack(Material.AIR));
+            return;
+        }
+
+        if (stateManager.isLegendaryCrafted(weaponId)
                 || stateManager.getCraftedLegendaryIds().size() >= legendaryRegistry.ids().size()) {
             event.getInventory().setResult(new ItemStack(Material.AIR));
         }
@@ -155,8 +170,15 @@ public final class ContentManager implements Listener {
         stateManager.saveStateAsync();
 
         String teamName = teamManager.getTeamName(crafter.getUniqueId()).orElse("No Team");
-        Bukkit.broadcast(Component.text(crafter.getName()
-                + " crafted " + getDisplayName(weaponId) + " [" + legendaryCount + "/4] for " + teamName + "."));
+        Bukkit.broadcast(Component.text()
+            .append(Component.text(crafter.getName(), NamedTextColor.AQUA))
+            .append(Component.text(" crafted ", NamedTextColor.GRAY))
+            .append(Component.text(getDisplayName(weaponId), NamedTextColor.GOLD))
+            .append(Component.text(" [" + legendaryCount + "/4]", NamedTextColor.YELLOW))
+            .append(Component.text(" for ", NamedTextColor.GRAY))
+            .append(Component.text(teamName, NamedTextColor.GREEN))
+            .append(Component.text(".", NamedTextColor.GRAY))
+            .build());
     }
 
     public List<String> getLegendaryWeaponIds() {
@@ -189,8 +211,14 @@ public final class ContentManager implements Listener {
         stateManager.setLegendaryCount(legendaryCount);
         stateManager.saveStateAsync();
 
-        Bukkit.broadcast(Component.text(sourceName + " granted " + weapon.getDisplayName() + " to "
-                + target.getName() + " [" + legendaryCount + "/4]."));
+        Bukkit.broadcast(Component.text()
+            .append(Component.text(sourceName, NamedTextColor.AQUA))
+            .append(Component.text(" granted ", NamedTextColor.GRAY))
+            .append(Component.text(weapon.getDisplayName(), NamedTextColor.GOLD))
+            .append(Component.text(" to ", NamedTextColor.GRAY))
+            .append(Component.text(target.getName(), NamedTextColor.AQUA))
+            .append(Component.text(" [" + legendaryCount + "/4].", NamedTextColor.YELLOW))
+            .build());
         return true;
     }
 
@@ -217,13 +245,43 @@ public final class ContentManager implements Listener {
         }
 
         legendaryRecipesRegistered = true;
-        Bukkit.broadcast(Component.text("Legendary recipes are now unlocked (one of each weapon per event)."));
+        Bukkit.broadcast(Component.text("Legendary recipes are now unlocked (one of each weapon per event).",
+            NamedTextColor.LIGHT_PURPLE));
     }
 
     private String getDisplayName(String weaponId) {
         return legendaryRegistry.byId(weaponId)
                 .map(LegendaryWeapon::getDisplayName)
                 .orElse(weaponId);
+    }
+
+    private void notifyLegendaryLockedUntilDayThree(List<HumanEntity> viewers) {
+        long now = System.currentTimeMillis();
+        for (HumanEntity viewer : viewers) {
+            if (!(viewer instanceof Player player)) {
+                continue;
+            }
+
+            UUID playerId = player.getUniqueId();
+            long lastMessageAt = legendaryLockMessageMillis.getOrDefault(playerId, 0L);
+            if (now - lastMessageAt < LEGENDARY_LOCK_MESSAGE_COOLDOWN_MS) {
+                continue;
+            }
+
+            legendaryLockMessageMillis.put(playerId, now);
+            player.sendMessage(Component.text("Legendary crafting is locked until Day 3.", NamedTextColor.RED));
+        }
+    }
+
+    private void clearLegendaryProgressIfLockedByDay() {
+        if (stateManager.getCraftedLegendaryIds().isEmpty() && stateManager.getLegendaryCount() == 0) {
+            legendaryCount = 0;
+            return;
+        }
+
+        stateManager.clearLegendaryProgress();
+        stateManager.saveStateAsync();
+        legendaryCount = 0;
     }
 
     private String normalizeId(String weaponId) {
