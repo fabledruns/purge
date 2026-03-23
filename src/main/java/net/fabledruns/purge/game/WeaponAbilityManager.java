@@ -8,6 +8,11 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ThreadLocalRandom;
 import net.fabledruns.purge.PurgePlugin;
+import net.fabledruns.purge.legendary.LegendaryKeys;
+import net.fabledruns.purge.legendary.weapons.DragonWingsWeapon;
+import net.fabledruns.purge.legendary.weapons.StoneFallWeapon;
+import net.fabledruns.purge.legendary.weapons.VoidSnareWeapon;
+import net.fabledruns.purge.legendary.weapons.WitherBoneBladeWeapon;
 import net.fabledruns.purge.system.PlayerManager;
 import net.fabledruns.purge.system.WorldManager;
 import net.fabledruns.purge.team.TeamManager;
@@ -45,6 +50,7 @@ import org.bukkit.event.player.PlayerSwapHandItemsEvent;
 import org.bukkit.event.player.PlayerToggleSneakEvent;
 import org.bukkit.inventory.EquipmentSlot;
 import org.bukkit.inventory.ItemStack;
+import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.persistence.PersistentDataContainer;
 import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.potion.PotionEffect;
@@ -61,6 +67,7 @@ public final class WeaponAbilityManager implements Listener {
     private final TeamManager teamManager;
 
     private final NamespacedKey weaponIdKey;
+    private final NamespacedKey textureUuidKey;
     private final NamespacedKey voidHomingArrowKey;
     private final NamespacedKey voidSpecialArrowKey;
     private final NamespacedKey dragonArmorModifierKey;
@@ -70,8 +77,9 @@ public final class WeaponAbilityManager implements Listener {
     private final Map<UUID, Long> witherEmpoweredUntil;
     private final Map<UUID, SkullRateWindow> skullRateWindows;
 
-    private final Map<UUID, Long> dragonCooldownUntil;
     private final Map<UUID, Long> dragonToggleDebounceUntil;
+    private final Map<UUID, Long> dragonLastGlideMillis;
+    private final Map<UUID, Long> dragonImpactImmunityUntil;
 
     private final Map<UUID, Long> stoneCooldownUntil;
 
@@ -97,7 +105,8 @@ public final class WeaponAbilityManager implements Listener {
         this.worldManager = worldManager;
         this.teamManager = teamManager;
 
-        this.weaponIdKey = new NamespacedKey(plugin, ContentManager.LEGENDARY_WEAPON_ID_KEY);
+        this.weaponIdKey = new NamespacedKey(plugin, LegendaryKeys.WEAPON_ID_KEY);
+        this.textureUuidKey = new NamespacedKey(plugin, LegendaryKeys.TEXTURE_UUID_KEY);
         this.voidHomingArrowKey = new NamespacedKey(plugin, "void_snare_homing_arrow");
         this.voidSpecialArrowKey = new NamespacedKey(plugin, "void_snare_special_arrow");
         this.dragonArmorModifierKey = new NamespacedKey(plugin, "dragon_wings_armor_modifier");
@@ -107,8 +116,9 @@ public final class WeaponAbilityManager implements Listener {
         this.witherEmpoweredUntil = new ConcurrentHashMap<>();
         this.skullRateWindows = new ConcurrentHashMap<>();
 
-        this.dragonCooldownUntil = new ConcurrentHashMap<>();
         this.dragonToggleDebounceUntil = new ConcurrentHashMap<>();
+        this.dragonLastGlideMillis = new ConcurrentHashMap<>();
+        this.dragonImpactImmunityUntil = new ConcurrentHashMap<>();
 
         this.stoneCooldownUntil = new ConcurrentHashMap<>();
 
@@ -145,13 +155,15 @@ public final class WeaponAbilityManager implements Listener {
             removeWitherStrength(player);
             syncDragonArmorModifiers(player, false);
             clearRoot(player.getUniqueId());
+            clearDragonWingsState(player.getUniqueId());
         }
 
         witherCooldownUntil.clear();
         witherEmpoweredUntil.clear();
         skullRateWindows.clear();
-        dragonCooldownUntil.clear();
         dragonToggleDebounceUntil.clear();
+        dragonLastGlideMillis.clear();
+        dragonImpactImmunityUntil.clear();
         stoneCooldownUntil.clear();
         voidSnareCooldownUntil.clear();
         homingArrows.clear();
@@ -163,7 +175,7 @@ public final class WeaponAbilityManager implements Listener {
         Player player = event.getPlayer();
         Bukkit.getScheduler().runTask(plugin, () -> {
             syncWitherStrengthPassive(player);
-            syncDragonArmorModifiers(player, hasWeapon(player.getInventory().getChestplate(), ContentManager.DRAGON_WINGS_ID));
+            syncDragonArmorModifiers(player, hasWeapon(player.getInventory().getChestplate(), DragonWingsWeapon.ID));
         });
     }
 
@@ -173,6 +185,7 @@ public final class WeaponAbilityManager implements Listener {
         removeWitherStrength(player);
         syncDragonArmorModifiers(player, false);
         clearRoot(player.getUniqueId());
+        clearDragonWingsState(player.getUniqueId());
     }
 
     @EventHandler(priority = EventPriority.MONITOR)
@@ -181,6 +194,7 @@ public final class WeaponAbilityManager implements Listener {
         removeWitherStrength(player);
         syncDragonArmorModifiers(player, false);
         clearRoot(player.getUniqueId());
+        clearDragonWingsState(player.getUniqueId());
     }
 
     @EventHandler(priority = EventPriority.MONITOR)
@@ -206,11 +220,11 @@ public final class WeaponAbilityManager implements Listener {
 
         Bukkit.getScheduler().runTask(plugin, () -> {
             syncWitherStrengthPassive(player);
-            syncDragonArmorModifiers(player, hasWeapon(player.getInventory().getChestplate(), ContentManager.DRAGON_WINGS_ID));
+            syncDragonArmorModifiers(player, hasWeapon(player.getInventory().getChestplate(), DragonWingsWeapon.ID));
         });
     }
 
-    @EventHandler(priority = EventPriority.NORMAL, ignoreCancelled = true)
+    @EventHandler(priority = EventPriority.HIGHEST)
     public void onRightClickAbility(PlayerInteractEvent event) {
         if (event.getHand() != EquipmentSlot.HAND) {
             return;
@@ -224,8 +238,7 @@ public final class WeaponAbilityManager implements Listener {
             }
         }
 
-        if (event.getAction() == org.bukkit.event.block.Action.RIGHT_CLICK_BLOCK
-            && event.useInteractedBlock() != Event.Result.DENY) {
+        if (shouldSkipAbilityForInteractedBlock(event)) {
             return;
         }
 
@@ -233,19 +246,16 @@ public final class WeaponAbilityManager implements Listener {
         ItemStack mainHand = player.getInventory().getItemInMainHand();
         String weaponId = getWeaponId(mainHand);
 
-        if (ContentManager.WITHER_BONE_BLADE_ID.equals(weaponId)) {
+        if (WitherBoneBladeWeapon.ID.equals(weaponId)) {
             activateWitherBoneBlade(player);
             return;
         }
 
-        if (ContentManager.STONE_FALL_ID.equals(weaponId)) {
+        if (StoneFallWeapon.ID.equals(weaponId)) {
             activateStoneFall(player);
             return;
         }
 
-        if (hasWeapon(player.getInventory().getChestplate(), ContentManager.DRAGON_WINGS_ID)) {
-            activateDragonWingsBoost(player);
-        }
     }
 
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
@@ -260,7 +270,7 @@ public final class WeaponAbilityManager implements Listener {
             return;
         }
 
-        if (!hasWeapon(attacker.getInventory().getItemInMainHand(), ContentManager.WITHER_BONE_BLADE_ID)) {
+        if (!hasWeapon(attacker.getInventory().getItemInMainHand(), WitherBoneBladeWeapon.ID)) {
             return;
         }
 
@@ -284,7 +294,7 @@ public final class WeaponAbilityManager implements Listener {
             return;
         }
 
-        if (!hasWeapon(attacker.getInventory().getItemInMainHand(), ContentManager.WITHER_BONE_BLADE_ID)) {
+        if (!hasWeapon(attacker.getInventory().getItemInMainHand(), WitherBoneBladeWeapon.ID)) {
             return;
         }
 
@@ -317,6 +327,7 @@ public final class WeaponAbilityManager implements Listener {
 
         spawnWitherSkulls(attacker, victim, skullsPerProc);
         window.spawnedCount += skullsPerProc;
+        attacker.playSound(attacker.getLocation(), Sound.ENTITY_WITHER_SHOOT, 0.6F, 1.15F);
     }
 
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
@@ -329,7 +340,7 @@ public final class WeaponAbilityManager implements Listener {
             return;
         }
 
-        if (!hasWeapon(player.getInventory().getItemInMainHand(), ContentManager.STONE_FALL_ID)) {
+        if (!hasWeapon(player.getInventory().getItemInMainHand(), StoneFallWeapon.ID)) {
             return;
         }
 
@@ -341,13 +352,81 @@ public final class WeaponAbilityManager implements Listener {
         event.setDamage(event.getDamage() * (1.0D - reduction));
     }
 
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
+    public void onDragonWingsImpactLanding(EntityDamageEvent event) {
+        if (!(event.getEntity() instanceof Player player)) {
+            return;
+        }
+
+        if (event.getCause() != EntityDamageEvent.DamageCause.FALL) {
+            return;
+        }
+
+        if (!hasWeapon(player.getInventory().getChestplate(), DragonWingsWeapon.ID)) {
+            return;
+        }
+
+        long now = System.currentTimeMillis();
+        long recentGlideWindowMs = Math.max(200L,
+                plugin.getConfig().getLong("legendary-weapons.dragon-wings.impact-glide-window-ms", 1800L));
+        long lastGlideAt = dragonLastGlideMillis.getOrDefault(player.getUniqueId(), 0L);
+        if (now - lastGlideAt > recentGlideWindowMs) {
+            return;
+        }
+
+        double minImpactDamage = Math.max(0.1D,
+                plugin.getConfig().getDouble("legendary-weapons.dragon-wings.impact-min-fall-damage", 8.0D));
+        if (event.getDamage() < minImpactDamage) {
+            return;
+        }
+
+        event.setCancelled(true);
+
+        long selfImmunityMs = Math.max(100L,
+                plugin.getConfig().getLong("legendary-weapons.dragon-wings.impact-self-immunity-ms", 1500L));
+        dragonImpactImmunityUntil.put(player.getUniqueId(), now + selfImmunityMs);
+
+        float explosionPower = (float) clamp(
+                plugin.getConfig().getDouble("legendary-weapons.dragon-wings.impact-explosion-power", 3.5D),
+                0.0D,
+                12.0D
+        );
+        player.getWorld().createExplosion(
+                player.getLocation().getX(),
+                player.getLocation().getY(),
+                player.getLocation().getZ(),
+                explosionPower,
+                false,
+                false,
+                player
+        );
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
+    public void onDragonWingsImpactSelfDamage(EntityDamageEvent event) {
+        if (!(event.getEntity() instanceof Player player)) {
+            return;
+        }
+
+        EntityDamageEvent.DamageCause cause = event.getCause();
+        if (cause != EntityDamageEvent.DamageCause.ENTITY_EXPLOSION
+                && cause != EntityDamageEvent.DamageCause.BLOCK_EXPLOSION) {
+            return;
+        }
+
+        long immunityUntil = dragonImpactImmunityUntil.getOrDefault(player.getUniqueId(), 0L);
+        if (immunityUntil > System.currentTimeMillis()) {
+            event.setCancelled(true);
+        }
+    }
+
     @EventHandler(priority = EventPriority.NORMAL, ignoreCancelled = true)
     public void onVoidSnareBowShot(EntityShootBowEvent event) {
         if (!(event.getEntity() instanceof Player shooter)) {
             return;
         }
 
-        if (!hasWeapon(event.getBow(), ContentManager.VOID_SNARE_ID)) {
+        if (!hasWeapon(event.getBow(), VoidSnareWeapon.ID)) {
             return;
         }
 
@@ -372,7 +451,7 @@ public final class WeaponAbilityManager implements Listener {
             return;
         }
 
-        if (!canUseCombatAbility(shooter, shooter.getLocation())) {
+        if (!canActivateAbility(shooter)) {
             return;
         }
 
@@ -388,6 +467,7 @@ public final class WeaponAbilityManager implements Listener {
         voidSnareCooldownUntil.put(shooterId, now + cooldownMillis);
         data.set(voidSpecialArrowKey, PersistentDataType.BYTE, (byte) 1);
         shooter.sendActionBar(Component.text("Void arrow primed."));
+        shooter.playSound(shooter.getLocation(), Sound.BLOCK_RESPAWN_ANCHOR_CHARGE, 0.7F, 1.2F);
     }
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
@@ -432,6 +512,7 @@ public final class WeaponAbilityManager implements Listener {
         victim.getWorld().spawnParticle(Particle.SQUID_INK, hitAt, 18, 0.4D, 0.4D, 0.4D, 0.02D);
         victim.getWorld().spawnParticle(Particle.SOUL, hitAt, 12, 0.35D, 0.35D, 0.35D, 0.01D);
         victim.playSound(victim.getLocation(), Sound.ENTITY_ENDERMAN_HURT, 0.8F, 0.75F);
+        shooter.playSound(shooter.getLocation(), Sound.BLOCK_RESPAWN_ANCHOR_DEPLETE, 0.65F, 0.9F);
 
         homingArrows.remove(arrow.getUniqueId());
     }
@@ -443,7 +524,7 @@ public final class WeaponAbilityManager implements Listener {
         }
 
         Player player = event.getPlayer();
-        if (!hasWeapon(player.getInventory().getChestplate(), ContentManager.DRAGON_WINGS_ID)) {
+        if (!hasWeapon(player.getInventory().getChestplate(), DragonWingsWeapon.ID)) {
             return;
         }
 
@@ -469,7 +550,7 @@ public final class WeaponAbilityManager implements Listener {
         }
 
         Player player = event.getPlayer();
-        if (!hasWeapon(player.getInventory().getChestplate(), ContentManager.DRAGON_WINGS_ID)) {
+        if (!hasWeapon(player.getInventory().getChestplate(), DragonWingsWeapon.ID)) {
             return;
         }
 
@@ -486,8 +567,11 @@ public final class WeaponAbilityManager implements Listener {
 
     private void syncPassiveStates() {
         for (Player player : Bukkit.getOnlinePlayers()) {
+            if (hasWeapon(player.getInventory().getChestplate(), DragonWingsWeapon.ID) && player.isGliding()) {
+                dragonLastGlideMillis.put(player.getUniqueId(), System.currentTimeMillis());
+            }
             syncWitherStrengthPassive(player);
-            syncDragonArmorModifiers(player, hasWeapon(player.getInventory().getChestplate(), ContentManager.DRAGON_WINGS_ID));
+            syncDragonArmorModifiers(player, hasWeapon(player.getInventory().getChestplate(), DragonWingsWeapon.ID));
         }
     }
 
@@ -516,10 +600,11 @@ public final class WeaponAbilityManager implements Listener {
 
         removeExpired(witherCooldownUntil, now);
         removeExpired(witherEmpoweredUntil, now);
-        removeExpired(dragonCooldownUntil, now);
         removeExpired(dragonToggleDebounceUntil, now);
+        removeExpired(dragonImpactImmunityUntil, now);
         removeExpired(stoneCooldownUntil, now);
         removeExpired(voidSnareCooldownUntil, now);
+        dragonLastGlideMillis.entrySet().removeIf(entry -> now - entry.getValue() > 10000L);
 
         skullRateWindows.entrySet().removeIf(entry -> now - entry.getValue().windowStartMillis > 2000L);
 
@@ -535,7 +620,7 @@ public final class WeaponAbilityManager implements Listener {
     }
 
     private void activateWitherBoneBlade(Player player) {
-        if (!canUseCombatAbility(player, player.getLocation())) {
+        if (!canActivateAbility(player)) {
             player.sendActionBar(Component.text("Cannot activate here."));
             return;
         }
@@ -557,36 +642,8 @@ public final class WeaponAbilityManager implements Listener {
         player.playSound(player.getLocation(), Sound.ENTITY_WITHER_SPAWN, 0.4F, 1.5F);
     }
 
-    private void activateDragonWingsBoost(Player player) {
-        if (!player.isGliding()) {
-            return;
-        }
-
-        if (!canUseCombatAbility(player, player.getLocation())) {
-            player.sendActionBar(Component.text("Cannot activate here."));
-            return;
-        }
-
-        UUID playerId = player.getUniqueId();
-        long now = System.currentTimeMillis();
-        long cooldownUntil = dragonCooldownUntil.getOrDefault(playerId, 0L);
-        if (cooldownUntil > now) {
-            sendCooldownMessage(player, "Dragon Wings", cooldownUntil - now);
-            return;
-        }
-
-        long cooldownMillis = Math.max(1L, plugin.getConfig().getLong("legendary-weapons.dragon-wings.cooldown-seconds", 10L)) * 1000L;
-        dragonCooldownUntil.put(playerId, now + cooldownMillis);
-
-        double multiplier = Math.max(0.1D, plugin.getConfig().getDouble("legendary-weapons.dragon-wings.boost-multiplier", 1.2D));
-        Vector boost = player.getLocation().getDirection().normalize().multiply(multiplier).add(new Vector(0.0D, 0.12D, 0.0D));
-        player.setVelocity(player.getVelocity().add(boost));
-        player.getWorld().spawnParticle(Particle.FIREWORK, player.getLocation(), 14, 0.2D, 0.2D, 0.2D, 0.02D);
-        player.playSound(player.getLocation(), Sound.ENTITY_FIREWORK_ROCKET_LAUNCH, 0.7F, 1.2F);
-    }
-
     private void activateStoneFall(Player player) {
-        if (!canUseCombatAbility(player, player.getLocation())) {
+        if (!canActivateAbility(player)) {
             player.sendActionBar(Component.text("Cannot activate here."));
             return;
         }
@@ -629,9 +686,9 @@ public final class WeaponAbilityManager implements Listener {
         int maxArrowLifeTicks = Math.max(20, plugin.getConfig().getInt("legendary-weapons.void-snare.max-arrow-life-ticks", 200));
         double range = Math.max(1.0D, plugin.getConfig().getDouble("legendary-weapons.void-snare.homing-range", 6.0D));
         double turnRate = clamp(
-                plugin.getConfig().getDouble("legendary-weapons.void-snare.homing-turn-rate", 0.08D),
-                0.01D,
-                0.25D
+            plugin.getConfig().getDouble("legendary-weapons.void-snare.homing-turn-rate", 0.16D),
+            0.03D,
+            0.35D
         );
 
         Iterator<Map.Entry<UUID, UUID>> iterator = homingArrows.entrySet().iterator();
@@ -655,7 +712,7 @@ public final class WeaponAbilityManager implements Listener {
                 continue;
             }
 
-            Player target = findHomingTarget(arrow, shooter, range);
+            LivingEntity target = findHomingTarget(arrow, shooter, range);
             if (target == null) {
                 continue;
             }
@@ -667,26 +724,30 @@ public final class WeaponAbilityManager implements Listener {
             }
 
             Vector desiredDirection = target.getEyeLocation().toVector().subtract(arrow.getLocation().toVector()).normalize();
-            Vector adjusted = velocity.clone().multiply(1.0D - turnRate).add(desiredDirection.multiply(speed * turnRate));
-            arrow.setVelocity(adjusted);
+            Vector adjustedDirection = velocity.clone().normalize().multiply(1.0D - turnRate)
+                    .add(desiredDirection.multiply(turnRate)).normalize();
+            arrow.setVelocity(adjustedDirection.multiply(speed));
         }
     }
 
-    private Player findHomingTarget(Arrow arrow, Player shooter, double range) {
-        Player nearest = null;
+    private LivingEntity findHomingTarget(Arrow arrow, Player shooter, double range) {
+        LivingEntity nearest = null;
         double nearestDistanceSquared = Double.MAX_VALUE;
 
         for (Entity entity : arrow.getNearbyEntities(range, range, range)) {
-            if (!(entity instanceof Player target) || target.isDead() || target.getUniqueId().equals(shooter.getUniqueId())) {
+            if (!(entity instanceof LivingEntity target)
+                    || target.isDead()
+                    || target.getUniqueId().equals(shooter.getUniqueId())) {
                 continue;
             }
 
-            if (!playerManager.isAlive(target.getUniqueId())) {
-                continue;
-            }
-
-            if (!teamManager.canFriendlyFire(shooter.getUniqueId(), target.getUniqueId(), gameManager.getCurrentDay())) {
-                continue;
+            if (target instanceof Player targetPlayer) {
+                if (!playerManager.isAlive(targetPlayer.getUniqueId())) {
+                    continue;
+                }
+                if (!teamManager.canFriendlyFire(shooter.getUniqueId(), targetPlayer.getUniqueId(), gameManager.getCurrentDay())) {
+                    continue;
+                }
             }
 
             double dist = arrow.getLocation().distanceSquared(target.getLocation());
@@ -760,7 +821,7 @@ public final class WeaponAbilityManager implements Listener {
 
     private void syncWitherStrengthPassive(Player player) {
         boolean shouldApply = playerManager.isAlive(player.getUniqueId())
-                && hasWeapon(player.getInventory().getItemInMainHand(), ContentManager.WITHER_BONE_BLADE_ID);
+                && hasWeapon(player.getInventory().getItemInMainHand(), WitherBoneBladeWeapon.ID);
 
         if (shouldApply) {
             player.addPotionEffect(new PotionEffect(PotionEffectType.STRENGTH, 40, 0, false, false, false));
@@ -841,7 +902,16 @@ public final class WeaponAbilityManager implements Listener {
     private void toggleGliding(Player player) {
         boolean nextState = !player.isGliding();
         player.setGliding(nextState);
+        if (nextState) {
+            dragonLastGlideMillis.put(player.getUniqueId(), System.currentTimeMillis());
+        }
+        player.playSound(player.getLocation(), Sound.ENTITY_ENDER_DRAGON_FLAP, 0.45F, nextState ? 1.35F : 0.9F);
         player.sendActionBar(Component.text(nextState ? "Dragon Wings gliding enabled." : "Dragon Wings gliding disabled."));
+    }
+
+    private void clearDragonWingsState(UUID playerId) {
+        dragonLastGlideMillis.remove(playerId);
+        dragonImpactImmunityUntil.remove(playerId);
     }
 
     private int getVoidHomingIntervalTicks() {
@@ -864,17 +934,41 @@ public final class WeaponAbilityManager implements Listener {
             return "";
         }
 
-        PersistentDataContainer data = item.getItemMeta().getPersistentDataContainer();
+        ItemMeta meta = item.getItemMeta();
+        PersistentDataContainer data = meta.getPersistentDataContainer();
+        if (data.has(textureUuidKey, PersistentDataType.STRING)) {
+            data.remove(textureUuidKey);
+            item.setItemMeta(meta);
+        }
+
         String stored = data.get(weaponIdKey, PersistentDataType.STRING);
         return stored == null ? "" : stored;
     }
 
-    private boolean canUseCombatAbility(Player player, Location at) {
+    private boolean canActivateAbility(Player player) {
         if (!playerManager.isAlive(player.getUniqueId())) {
             return false;
         }
 
-        return worldManager.isPvpAllowed(at);
+        return !player.isDead();
+    }
+
+    @SuppressWarnings("deprecation")
+    private boolean shouldSkipAbilityForInteractedBlock(PlayerInteractEvent event) {
+        if (event.getAction() != org.bukkit.event.block.Action.RIGHT_CLICK_BLOCK) {
+            return false;
+        }
+
+        if (event.useInteractedBlock() == Event.Result.DENY || event.getClickedBlock() == null) {
+            return false;
+        }
+
+        // Allow intentional ability activation while sneaking, even on interactable blocks.
+        if (event.getPlayer().isSneaking()) {
+            return false;
+        }
+
+        return event.getClickedBlock().getType().isInteractable();
     }
 
     private double clamp(double value, double min, double max) {

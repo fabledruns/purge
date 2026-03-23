@@ -4,10 +4,17 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ThreadLocalRandom;
 import net.fabledruns.purge.PurgePlugin;
+import net.fabledruns.purge.legendary.LegendaryWeapon;
+import net.fabledruns.purge.legendary.LegendaryWeaponRegistry;
+import net.fabledruns.purge.legendary.weapons.DragonWingsWeapon;
+import net.fabledruns.purge.legendary.weapons.StoneFallWeapon;
+import net.fabledruns.purge.legendary.weapons.VoidSnareWeapon;
+import net.fabledruns.purge.legendary.weapons.WitherBoneBladeWeapon;
 import net.fabledruns.purge.system.StateManager;
 import net.fabledruns.purge.team.TeamManager;
 import net.kyori.adventure.text.Component;
@@ -18,36 +25,32 @@ import org.bukkit.NamespacedKey;
 import org.bukkit.World;
 import org.bukkit.block.Block;
 import org.bukkit.block.Chest;
-import org.bukkit.enchantments.Enchantment;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.inventory.CraftItemEvent;
 import org.bukkit.event.inventory.PrepareItemCraftEvent;
-import org.bukkit.inventory.ItemFlag;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.Recipe;
 import org.bukkit.inventory.ShapedRecipe;
-import org.bukkit.inventory.meta.ItemMeta;
-import org.bukkit.persistence.PersistentDataType;
-import org.bukkit.inventory.recipe.CraftingBookCategory;
 
 public final class ContentManager implements Listener {
 
-    public static final String LEGENDARY_WEAPON_ID_KEY = "legendary_weapon_id";
-    public static final String WITHER_BONE_BLADE_ID = "wither_bone_blade";
-    public static final String DRAGON_WINGS_ID = "dragon_wings";
-    public static final String STONE_FALL_ID = "stone_fall";
-    public static final String VOID_SNARE_ID = "void_snare";
+    public static final String WITHER_BONE_BLADE_ID = WitherBoneBladeWeapon.ID;
+    public static final String DRAGON_WINGS_ID = DragonWingsWeapon.ID;
+    public static final String STONE_FALL_ID = StoneFallWeapon.ID;
+    public static final String VOID_SNARE_ID = VoidSnareWeapon.ID;
 
     private final PurgePlugin plugin;
     private final StateManager stateManager;
     private final GameManager gameManager;
     private final TeamManager teamManager;
+    private final LegendaryWeaponRegistry legendaryRegistry;
 
     private final Map<NamespacedKey, ItemStack> legendaryItems;
-    private final Set<NamespacedKey> legendaryKeys;
+    private final Map<NamespacedKey, String> legendaryIdsByRecipeKey;
+    private final Set<NamespacedKey> legendaryRecipeKeys;
     private final Set<Integer> spawnedStructureDays;
 
     private int legendaryCount;
@@ -58,12 +61,14 @@ public final class ContentManager implements Listener {
         this.stateManager = stateManager;
         this.gameManager = gameManager;
         this.teamManager = teamManager;
+        this.legendaryRegistry = new LegendaryWeaponRegistry();
 
         this.legendaryItems = new HashMap<>();
-        this.legendaryKeys = new HashSet<>();
+        this.legendaryIdsByRecipeKey = new HashMap<>();
+        this.legendaryRecipeKeys = new HashSet<>();
         this.spawnedStructureDays = new HashSet<>();
 
-        this.legendaryCount = stateManager.getLegendaryCount();
+        this.legendaryCount = Math.max(stateManager.getLegendaryCount(), stateManager.getCraftedLegendaryIds().size());
         this.legendaryRecipesRegistered = false;
 
         buildLegendaryItems();
@@ -87,11 +92,18 @@ public final class ContentManager implements Listener {
         }
 
         NamespacedKey key = shapedRecipe.getKey();
-        if (!legendaryKeys.contains(key)) {
+        if (!legendaryRecipeKeys.contains(key)) {
             return;
         }
 
-        if (gameManager.getCurrentDay() < 3 || legendaryCount >= 4) {
+        String weaponId = legendaryIdsByRecipeKey.get(key);
+        if (weaponId == null) {
+            return;
+        }
+
+        if (gameManager.getCurrentDay() < 3
+                || stateManager.isLegendaryCrafted(weaponId)
+                || stateManager.getCraftedLegendaryIds().size() >= legendaryRegistry.ids().size()) {
             event.getInventory().setResult(new ItemStack(Material.AIR));
         }
     }
@@ -104,11 +116,17 @@ public final class ContentManager implements Listener {
         }
 
         NamespacedKey key = shapedRecipe.getKey();
-        if (!legendaryKeys.contains(key)) {
+        if (!legendaryRecipeKeys.contains(key)) {
             return;
         }
 
         if (!(event.getWhoClicked() instanceof Player crafter)) {
+            event.setCancelled(true);
+            return;
+        }
+
+        String weaponId = legendaryIdsByRecipeKey.get(key);
+        if (weaponId == null) {
             event.setCancelled(true);
             return;
         }
@@ -119,134 +137,74 @@ public final class ContentManager implements Listener {
             return;
         }
 
-        if (legendaryCount >= 4) {
+        if (stateManager.isLegendaryCrafted(weaponId)) {
             event.setCancelled(true);
-            crafter.sendMessage("Global legendary cap reached (4/4).");
+            crafter.sendMessage(getDisplayName(weaponId) + " already exists and cannot be crafted again.");
             return;
         }
 
-        legendaryCount++;
+        if (stateManager.getCraftedLegendaryIds().size() >= legendaryRegistry.ids().size()) {
+            event.setCancelled(true);
+            crafter.sendMessage("All legendary weapons already exist for this event.");
+            return;
+        }
+
+        stateManager.markLegendaryCrafted(weaponId);
+        legendaryCount = stateManager.getCraftedLegendaryIds().size();
         stateManager.setLegendaryCount(legendaryCount);
         stateManager.saveStateAsync();
 
         String teamName = teamManager.getTeamName(crafter.getUniqueId()).orElse("No Team");
         Bukkit.broadcast(Component.text(crafter.getName()
-                + " crafted a legendary weapon [" + legendaryCount + "/4] for " + teamName + "."));
+                + " crafted " + getDisplayName(weaponId) + " [" + legendaryCount + "/4] for " + teamName + "."));
+    }
+
+    public List<String> getLegendaryWeaponIds() {
+        return legendaryRegistry.ids().stream().sorted().toList();
+    }
+
+    public boolean isLegendaryCrafted(String weaponId) {
+        return stateManager.isLegendaryCrafted(normalizeId(weaponId));
+    }
+
+    public boolean giveLegendary(String weaponId, Player target, String sourceName) {
+        String normalized = normalizeId(weaponId);
+        LegendaryWeapon weapon = legendaryRegistry.byId(normalized).orElse(null);
+        if (weapon == null) {
+            return false;
+        }
+
+        if (stateManager.isLegendaryCrafted(normalized)) {
+            return false;
+        }
+
+        ItemStack item = weapon.createItem(plugin);
+        Map<Integer, ItemStack> overflow = target.getInventory().addItem(item);
+        for (ItemStack dropped : overflow.values()) {
+            target.getWorld().dropItemNaturally(target.getLocation(), dropped);
+        }
+
+        stateManager.markLegendaryCrafted(normalized);
+        legendaryCount = stateManager.getCraftedLegendaryIds().size();
+        stateManager.setLegendaryCount(legendaryCount);
+        stateManager.saveStateAsync();
+
+        Bukkit.broadcast(Component.text(sourceName + " granted " + weapon.getDisplayName() + " to "
+                + target.getName() + " [" + legendaryCount + "/4]."));
+        return true;
     }
 
     private void buildLegendaryItems() {
         legendaryItems.clear();
-        legendaryKeys.clear();
+        legendaryIdsByRecipeKey.clear();
+        legendaryRecipeKeys.clear();
 
-        legendaryItems.put(
-            new NamespacedKey(plugin, "legendary_wither_bone_blade"),
-            createLegendaryItem(
-                Material.NETHERITE_SWORD,
-                "Wither Bone Blade",
-                WITHER_BONE_BLADE_ID,
-                List.of(
-                    "Passive: Strength I while held.",
-                    "Active: 10s empowered strikes with wither skull bursts.",
-                    "Cooldown: 90s"
-                ),
-                Map.of(
-                    Enchantment.SHARPNESS, 5,
-                    Enchantment.UNBREAKING, 3,
-                    Enchantment.MENDING, 1
-                )
-            )
-        );
-
-        legendaryItems.put(
-            new NamespacedKey(plugin, "legendary_dragon_wings"),
-            createLegendaryItem(
-                Material.ELYTRA,
-                "Dragon Wings",
-                DRAGON_WINGS_ID,
-                List.of(
-                    "Passive: Diamond chestplate-level armor while worn.",
-                    "Passive: Mid-air glide toggle (jump, sneak fallback).",
-                    "Active: Firework-like boost while gliding.",
-                    "Cooldown: 10s"
-                ),
-                Map.of(
-                    Enchantment.UNBREAKING, 3,
-                    Enchantment.MENDING, 1
-                )
-            )
-        );
-
-        legendaryItems.put(
-            new NamespacedKey(plugin, "legendary_stone_fall"),
-            createLegendaryItem(
-                Material.MACE,
-                "Stone Fall",
-                STONE_FALL_ID,
-                List.of(
-                    "Passive: Negates 75% of fall damage while held.",
-                    "Active: Riptide-like forward lunge with hunger drain.",
-                    "Cooldown: 1s"
-                ),
-                Map.of(
-                    Enchantment.DENSITY, 5,
-                    Enchantment.UNBREAKING, 3,
-                    Enchantment.MENDING, 1
-                )
-            )
-        );
-
-        legendaryItems.put(
-            new NamespacedKey(plugin, "legendary_void_snare"),
-            createLegendaryItem(
-                Material.BOW,
-                "Void Snare",
-                VOID_SNARE_ID,
-                List.of(
-                    "Passive: Arrows subtly track nearby targets.",
-                    "Active: Fully charged void arrow roots and weakens.",
-                    "Cooldown: 20s"
-                ),
-                Map.of(
-                    Enchantment.POWER, 5,
-                    Enchantment.PUNCH, 2,
-                    Enchantment.UNBREAKING, 3,
-                    Enchantment.MENDING, 1
-                )
-            )
-        );
-
-        legendaryKeys.addAll(legendaryItems.keySet());
-    }
-
-    private ItemStack createLegendaryItem(
-            Material material,
-            String displayName,
-            String weaponId,
-            List<String> loreLines,
-            Map<Enchantment, Integer> enchantments
-    ) {
-        ItemStack item = new ItemStack(material);
-        ItemMeta meta = item.getItemMeta();
-        if (meta != null) {
-            meta.displayName(Component.text(displayName));
-            List<Component> lore = new ArrayList<>();
-            lore.add(Component.text("Only four legends exist each event."));
-            for (String line : loreLines) {
-                lore.add(Component.text(line));
-            }
-            meta.lore(lore);
-            for (Map.Entry<Enchantment, Integer> enchantment : enchantments.entrySet()) {
-                meta.addEnchant(enchantment.getKey(), enchantment.getValue(), true);
-            }
-            meta.getPersistentDataContainer().set(
-                    new NamespacedKey(plugin, LEGENDARY_WEAPON_ID_KEY),
-                    PersistentDataType.STRING,
-                    weaponId
-            );
-            meta.addItemFlags(ItemFlag.HIDE_ENCHANTS);
-            item.setItemMeta(meta);
+        for (LegendaryWeapon weapon : legendaryRegistry.all()) {
+            ShapedRecipe recipe = weapon.createRecipe(plugin);
+            legendaryItems.put(recipe.getKey(), weapon.createItem(plugin));
+            legendaryIdsByRecipeKey.put(recipe.getKey(), weapon.getId());
+            legendaryRecipeKeys.add(recipe.getKey());
         }
-        return item;
     }
 
     private void registerLegendaryRecipes() {
@@ -254,78 +212,25 @@ public final class ContentManager implements Listener {
             return;
         }
 
-        registerWitherBoneBladeRecipe();
-        registerDragonWingsRecipe();
-        registerStoneFallRecipe();
-        registerVoidSnareRecipe();
+        for (LegendaryWeapon weapon : legendaryRegistry.all()) {
+            Bukkit.addRecipe(weapon.createRecipe(plugin));
+        }
 
         legendaryRecipesRegistered = true;
-        Bukkit.broadcast(Component.text("Legendary recipes are now unlocked (4 total crafts globally)."));
+        Bukkit.broadcast(Component.text("Legendary recipes are now unlocked (one of each weapon per event)."));
     }
 
-    private void registerWitherBoneBladeRecipe() {
-        NamespacedKey key = new NamespacedKey(plugin, "legendary_wither_bone_blade");
-        ItemStack result = legendaryItems.get(key);
-        if (result == null) {
-            return;
-        }
-
-        ShapedRecipe recipe = new ShapedRecipe(key, result.clone());
-        recipe.shape(" W ", "WSW", " N ");
-        recipe.setIngredient('W', Material.WITHER_SKELETON_SKULL);
-        recipe.setIngredient('S', Material.NETHERITE_SWORD);
-        recipe.setIngredient('N', Material.NETHER_STAR);
-        recipe.setCategory(CraftingBookCategory.EQUIPMENT);
-        Bukkit.addRecipe(recipe);
+    private String getDisplayName(String weaponId) {
+        return legendaryRegistry.byId(weaponId)
+                .map(LegendaryWeapon::getDisplayName)
+                .orElse(weaponId);
     }
 
-    private void registerDragonWingsRecipe() {
-        NamespacedKey key = new NamespacedKey(plugin, "legendary_dragon_wings");
-        ItemStack result = legendaryItems.get(key);
-        if (result == null) {
-            return;
+    private String normalizeId(String weaponId) {
+        if (weaponId == null) {
+            return "";
         }
-
-        ShapedRecipe recipe = new ShapedRecipe(key, result.clone());
-        recipe.shape("PFP", "FEF", "PFP");
-        recipe.setIngredient('P', Material.PHANTOM_MEMBRANE);
-        recipe.setIngredient('F', Material.FIREWORK_ROCKET);
-        recipe.setIngredient('E', Material.ELYTRA);
-        recipe.setCategory(CraftingBookCategory.EQUIPMENT);
-        Bukkit.addRecipe(recipe);
-    }
-
-    private void registerStoneFallRecipe() {
-        NamespacedKey key = new NamespacedKey(plugin, "legendary_stone_fall");
-        ItemStack result = legendaryItems.get(key);
-        if (result == null) {
-            return;
-        }
-
-        ShapedRecipe recipe = new ShapedRecipe(key, result.clone());
-        recipe.shape("OOO", "OMO", "NWN");
-        recipe.setIngredient('O', Material.OBSIDIAN);
-        recipe.setIngredient('M', Material.MACE);
-        recipe.setIngredient('N', Material.NETHERITE_INGOT);
-        recipe.setIngredient('W', Material.WIND_CHARGE);
-        recipe.setCategory(CraftingBookCategory.EQUIPMENT);
-        Bukkit.addRecipe(recipe);
-    }
-
-    private void registerVoidSnareRecipe() {
-        NamespacedKey key = new NamespacedKey(plugin, "legendary_void_snare");
-        ItemStack result = legendaryItems.get(key);
-        if (result == null) {
-            return;
-        }
-
-        ShapedRecipe recipe = new ShapedRecipe(key, result.clone());
-        recipe.shape("ESE", "SBS", "ESE");
-        recipe.setIngredient('E', Material.ENDER_EYE);
-        recipe.setIngredient('S', Material.SHULKER_SHELL);
-        recipe.setIngredient('B', Material.BOW);
-        recipe.setCategory(CraftingBookCategory.EQUIPMENT);
-        Bukkit.addRecipe(recipe);
+        return weaponId.toLowerCase(Locale.ROOT);
     }
 
     private void spawnStructuresForDay(int day) {

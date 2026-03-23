@@ -10,7 +10,7 @@ softdepend: [WorldGuard]
 commands:
   purge:
     description: Purge event admin command
-    usage: /purge <start|pause|resume|next|setday|reload|status|save>
+    usage: /purge <start|pause|resume|next|setday|reload|status|save|givelegendary>
     permission: purge.admin
   team:
     description: Team management command

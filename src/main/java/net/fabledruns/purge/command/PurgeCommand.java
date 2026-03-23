@@ -5,12 +5,14 @@ import java.util.List;
 import java.util.Locale;
 import net.fabledruns.purge.PurgePlugin;
 import net.fabledruns.purge.game.ArenaManager;
+import net.fabledruns.purge.game.ContentManager;
 import net.fabledruns.purge.game.GameManager;
 import net.fabledruns.purge.system.PerformanceManager;
 import net.fabledruns.purge.system.PlayerManager;
 import net.fabledruns.purge.system.StateManager;
 import net.fabledruns.purge.system.WorldManager;
 import net.fabledruns.purge.team.TeamManager;
+import org.bukkit.Bukkit;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
@@ -111,6 +113,7 @@ public final class PurgeCommand implements CommandExecutor, TabCompleter {
                 stateManager.saveStateSync();
                 sender.sendMessage("State saved.");
             }
+            case "givelegendary" -> handleGiveLegendary(sender, args);
             default -> sendUsage(sender);
         }
 
@@ -195,6 +198,55 @@ public final class PurgeCommand implements CommandExecutor, TabCompleter {
         sender.sendMessage("/purge reload");
         sender.sendMessage("/purge status");
         sender.sendMessage("/purge save");
+        sender.sendMessage("/purge givelegendary <weaponId> [player]");
+    }
+
+    private void handleGiveLegendary(CommandSender sender, String[] args) {
+        ContentManager contentManager = plugin.getContentManager();
+        if (contentManager == null) {
+            sender.sendMessage("Legendary system is not available.");
+            return;
+        }
+
+        if (args.length < 2) {
+            sender.sendMessage("Usage: /purge givelegendary <weaponId> [player]");
+            sender.sendMessage("Available: " + String.join(", ", contentManager.getLegendaryWeaponIds()));
+            return;
+        }
+
+        String weaponId = args[1].toLowerCase(Locale.ROOT);
+        if (!contentManager.getLegendaryWeaponIds().contains(weaponId)) {
+            sender.sendMessage("Unknown weapon ID: " + weaponId);
+            sender.sendMessage("Available: " + String.join(", ", contentManager.getLegendaryWeaponIds()));
+            return;
+        }
+
+        Player target;
+        if (args.length >= 3) {
+            target = Bukkit.getPlayerExact(args[2]);
+            if (target == null) {
+                sender.sendMessage("Player not found: " + args[2]);
+                return;
+            }
+        } else {
+            if (!(sender instanceof Player player)) {
+                sender.sendMessage("Console must specify a target player.");
+                return;
+            }
+            target = player;
+        }
+
+        if (contentManager.isLegendaryCrafted(weaponId)) {
+            sender.sendMessage("That legendary already exists in this event.");
+            return;
+        }
+
+        if (!contentManager.giveLegendary(weaponId, target, sender.getName())) {
+            sender.sendMessage("Could not grant legendary.");
+            return;
+        }
+
+        sender.sendMessage("Granted " + weaponId + " to " + target.getName() + ".");
     }
 
     private void sendTeamUsage(CommandSender sender) {
@@ -234,6 +286,8 @@ public final class PurgeCommand implements CommandExecutor, TabCompleter {
         sender.sendMessage("Alive Players: " + playerManager.getAliveCount());
         sender.sendMessage("Teams: " + teamManager.getTeamCount());
         sender.sendMessage("Legendary Crafted: " + stateManager.getLegendaryCount() + "/4");
+        List<String> craftedIds = stateManager.getCraftedLegendaryIds().stream().sorted().toList();
+        sender.sendMessage("Legendary IDs: " + (craftedIds.isEmpty() ? "none" : String.join(", ", craftedIds)));
         sender.sendMessage("Arena Started: " + arenaManager.isStarted());
         sender.sendMessage("Arena Finished: " + arenaManager.isFinished());
         sender.sendMessage("Winner: " + (arenaManager.getWinnerTeam() == null ? "N/A" : arenaManager.getWinnerTeam()));
@@ -260,11 +314,23 @@ public final class PurgeCommand implements CommandExecutor, TabCompleter {
         }
 
         if (args.length == 1) {
-            return filter(args[0], List.of("start", "pause", "resume", "next", "setday", "reload", "status", "save"));
+            return filter(args[0], List.of("start", "pause", "resume", "next", "setday", "reload", "status", "save", "givelegendary"));
         }
 
         if (args.length == 2 && args[0].equalsIgnoreCase("setday")) {
             return filter(args[1], List.of("1", "2", "3", "4", "5", "6", "7"));
+        }
+
+        if (args.length == 2 && args[0].equalsIgnoreCase("givelegendary")) {
+            ContentManager contentManager = plugin.getContentManager();
+            if (contentManager == null) {
+                return List.of();
+            }
+            return filter(args[1], contentManager.getLegendaryWeaponIds());
+        }
+
+        if (args.length == 3 && args[0].equalsIgnoreCase("givelegendary")) {
+            return filter(args[2], Bukkit.getOnlinePlayers().stream().map(Player::getName).toList());
         }
 
         return List.of();

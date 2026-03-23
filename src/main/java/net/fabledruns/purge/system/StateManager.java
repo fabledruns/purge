@@ -47,6 +47,13 @@ public final class StateManager {
             loaded.dayEndEpochMillis = Math.max(0L, yaml.getLong("day.end-epoch-ms", 0L));
             loaded.paused = yaml.getBoolean("day.paused", false);
             loaded.legendaryCount = Math.max(0, yaml.getInt("legendary.count", 0));
+            for (String rawId : yaml.getStringList("legendary.crafted-ids")) {
+                if (rawId == null || rawId.isBlank()) {
+                    continue;
+                }
+                loaded.craftedLegendaryIds.add(rawId.toLowerCase(Locale.ROOT));
+            }
+            loaded.legendaryCount = Math.max(loaded.legendaryCount, loaded.craftedLegendaryIds.size());
             loaded.nextTeamId = Math.max(1, yaml.getInt("teams-meta.next-id", 1));
 
             for (String raw : yaml.getStringList("players.alive")) {
@@ -156,6 +163,33 @@ public final class StateManager {
         }
     }
 
+    public Set<String> getCraftedLegendaryIds() {
+        synchronized (lock) {
+            return new HashSet<>(state.craftedLegendaryIds);
+        }
+    }
+
+    public boolean isLegendaryCrafted(String weaponId) {
+        if (weaponId == null || weaponId.isBlank()) {
+            return false;
+        }
+
+        synchronized (lock) {
+            return state.craftedLegendaryIds.contains(weaponId.toLowerCase(Locale.ROOT));
+        }
+    }
+
+    public void markLegendaryCrafted(String weaponId) {
+        if (weaponId == null || weaponId.isBlank()) {
+            return;
+        }
+
+        synchronized (lock) {
+            state.craftedLegendaryIds.add(weaponId.toLowerCase(Locale.ROOT));
+            state.legendaryCount = state.craftedLegendaryIds.size();
+        }
+    }
+
     public int getNextTeamId() {
         synchronized (lock) {
             return state.nextTeamId;
@@ -254,6 +288,7 @@ public final class StateManager {
             copy.dayEndEpochMillis = state.dayEndEpochMillis;
             copy.paused = state.paused;
             copy.legendaryCount = state.legendaryCount;
+            copy.craftedLegendaryIds.addAll(state.craftedLegendaryIds);
             copy.nextTeamId = state.nextTeamId;
 
             copy.alivePlayers.addAll(state.alivePlayers);
@@ -281,6 +316,7 @@ public final class StateManager {
         yaml.set("day.end-epoch-ms", snapshot.dayEndEpochMillis);
         yaml.set("day.paused", snapshot.paused);
         yaml.set("legendary.count", snapshot.legendaryCount);
+        yaml.set("legendary.crafted-ids", snapshot.craftedLegendaryIds.stream().sorted().toList());
         yaml.set("teams-meta.next-id", snapshot.nextTeamId);
 
         yaml.set("players.alive", snapshot.alivePlayers.stream().map(UUID::toString).toList());
@@ -388,6 +424,7 @@ public final class StateManager {
         private long dayEndEpochMillis = 0L;
         private boolean paused = true;
         private int legendaryCount = 0;
+        private final Set<String> craftedLegendaryIds = new HashSet<>();
         private int nextTeamId = 1;
 
         private final Set<UUID> alivePlayers = new HashSet<>();

@@ -68,11 +68,13 @@ legendary-weapons:
     max-skulls-per-second: 12
 
   dragon-wings:
-    cooldown-seconds: 10
-    boost-multiplier: 1.2
     toggle-debounce-ms: 140
     jump-toggle-enabled: true
     sneak-fallback-enabled: true
+    impact-min-fall-damage: 8.0
+    impact-explosion-power: 3.5
+    impact-glide-window-ms: 1800
+    impact-self-immunity-ms: 1500
 
   stone-fall:
     cooldown-seconds: 1
@@ -88,6 +90,6 @@ legendary-weapons:
     root-ticks: 30
     weakness-ticks: 80
     homing-range: 6.0
-    homing-turn-rate: 0.08
+    homing-turn-rate: 0.16
     homing-check-interval-ticks: 2
     max-arrow-life-ticks: 200
